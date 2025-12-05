@@ -1,0 +1,384 @@
+---
+title: "Shift Chart – Latest Game"
+format:
+  html:
+    theme: cosmo
+    code-fold: true
+params:
+  team_name: "Arkansas"
+  season: "2025-26"
+---
+
+```{r setup, include=FALSE}
+suppressPackageStartupMessages({
+  library(dplyr); library(tidyr); library(stringr); library(forcats)
+  library(glue); library(ggplot2); library(ggimage); library(scales)
+  library(ggtext); library(curl); library(purrr); library(bigballR)
+})
+
+# If needed, load data objects used in the script:
+load("data/mbb_rosters_25_26.rda")
+load("data/teamids.rda")
+
+team_name <- params$team_name
+season    <- params$season
+today     <- format(Sys.Date(), "%Y.%m.%d")
+```
+
+## Get schedule and last game info
+
+```{r data-fetch}
+team_sched <- bigballR::get_team_schedule(
+  season    = season,
+  team.name = team_name
+) %>%
+  dplyr::mutate(
+    opponent    = ifelse(Home == team_name, Away, Home),
+    location    = ifelse(Home == team_name, "vs", "at"),
+    label_game  = glue("{Date} {location} {opponent}"),
+    final_score = glue("{Home} {Home_Score} - {Away} {Away_Score}")
+  )
+
+last_game_row <- team_sched %>%
+  dplyr::filter(!is.na(Game_ID)) %>%
+  dplyr::slice_tail(n = 1)
+
+last_game_id  <- last_game_row$Game_ID
+last_game_opp <- last_game_row$opponent
+
+game_meta   <- team_sched %>% dplyr::filter(Game_ID == last_game_id)
+final_score <- if (nrow(game_meta) == 1) game_meta$final_score else ""
+```
+
+## Helper functions and roster lookup
+
+```{r helpers}
+norm_name <- function(x) {
+  x %>%
+    stringr::str_replace_all("\\.", " ") %>%
+    stringr::str_to_title() %>%
+    stringr::str_squish()
+}
+
+base_name <- function(x) {
+  x %>%
+    norm_name() %>%
+    stringr::str_replace_all("\\b(Jr|Sr|II|III|IV|V)\\.?\\b", "") %>%
+    stringr::str_squish()
+}
+
+alias_map <- c(
+  "Billy Richmond" = "Billy Richmond III",
+  "Darius Acuff"   = "Darius Acuff Jr."
+)
+
+roster_team <- mbb_rosters_25_26 %>%
+  dplyr::filter(season == season, team_name == team_name) %>%
+  dplyr::transmute(
+    CleanName_roster = norm_name(name),
+    base_roster      = base_name(name),
+    headshot_url
+  )
+```
+
+## Shift chart generator
+
+```{r generator}
+generate_shift_chart <- function(game_id, team_name, teamids, season) {
+
+  game_data   <- bigballR::scrape_game(game_id = game_id)
+  home_team   <- game_data$Home[1]
+  is_home     <- (team_name == home_team)
+  team_prefix <- if (is_home) "Home" else "Away"
+  opp_prefix  <- if (is_home) "Away" else "Home"
+
+  team_id <- teamids %>%
+    dplyr::filter(
+      stringr::str_trim(tolower(Team)) == stringr::str_trim(tolower(team_name)),
+      Season == season
+    ) %>%
+    dplyr::pull(ID)
+
+  if (length(team_id) != 1) {
+    stop(glue("Could not find unique team_id for '{team_name}' in '{season}'"))
+  }
+
+  roster <- tryCatch({
+    tmp <- bigballR::get_team_roster(team.id = team_id)
+    if (nrow(tmp) == 0) stop("Empty roster")
+    tmp %>% dplyr::mutate(player_id = Player, CleanName = norm_name(Player))
+  }, error = function(e) {
+    game_data %>%
+      dplyr::select(dplyr::starts_with("Home."), dplyr::starts_with("Away.")) %>%
+      tidyr::pivot_longer(cols = dplyr::everything(), values_to = "Player") %>%
+      dplyr::distinct(Player) %>%
+      dplyr::mutate(player_id = Player, CleanName = norm_name(Player))
+  })
+
+  player_stats <- bigballR::get_player_stats(play_by_play_data = game_data) %>%
+    dplyr::filter(stringr::str_trim(tolower(Team)) == stringr::str_trim(tolower(team_name))) %>%
+    dplyr::mutate(player_id = Player)
+
+  final_time     <- max(game_data$Game_Seconds, na.rm = TRUE)
+  halftime       <- 1200
+  regulation_end <- 2400
+
+  get_players <- function(data, prefix, time_point) {
+    data %>%
+      dplyr::filter(Game_Seconds == time_point) %>%
+      dplyr::select(dplyr::all_of(paste0(prefix, ".", 1:5))) %>%
+      tidyr::pivot_longer(dplyr::everything(), values_to = "player") %>%
+      dplyr::distinct(player)
+  }
+
+  team_starters <- get_players(game_data, team_prefix, min(game_data$Game_Seconds)) %>%
+    dplyr::mutate(Game_Seconds = 0, sub_type = "in")
+
+  final_five <- get_players(game_data, team_prefix, final_time) %>%
+    dplyr::mutate(Game_Seconds = final_time, sub_type = "out")
+
+  sub_events <- game_data %>%
+    dplyr::filter(Event_Type %in% c("Enters Game", "Leaves Game")) %>%
+    dplyr::transmute(
+      Game_Seconds,
+      player   = Player_1,
+      sub_type = dplyr::if_else(Event_Type == "Enters Game", "in", "out")
+    )
+
+  all_subs <- dplyr::bind_rows(team_starters, sub_events, final_five) %>%
+    dplyr::arrange(player, Game_Seconds)
+
+  player_shifts <- all_subs %>%
+    dplyr::group_by(player) %>%
+    dplyr::mutate(
+      next_time = dplyr::lead(Game_Seconds),
+      shift_id  = cumsum(sub_type == "in")
+    ) %>%
+    dplyr::filter(sub_type == "in" & !is.na(next_time)) %>%
+    dplyr::rename(start = Game_Seconds, end = next_time) %>%
+    dplyr::ungroup()
+
+  split_boundaries <- function(shifts, boundary) {
+    cross <- shifts %>% dplyr::filter(start < boundary & end > boundary)
+    split <- dplyr::bind_rows(
+      cross %>% dplyr::mutate(end = boundary),
+      cross %>% dplyr::mutate(start = boundary)
+    )
+    list(to_remove = cross, split = split)
+  }
+
+  reg_split  <- split_boundaries(player_shifts, regulation_end)
+  half_split <- split_boundaries(player_shifts, halftime)
+
+  player_shifts_final <- player_shifts %>%
+    dplyr::anti_join(
+      dplyr::bind_rows(reg_split$to_remove, half_split$to_remove),
+      by = c("player", "start", "end")
+    ) %>%
+    dplyr::bind_rows(reg_split$split, half_split$split) %>%
+    dplyr::arrange(player, start) %>%
+    dplyr::mutate(
+      period = dplyr::case_when(
+        end <= halftime ~ "1st Half",
+        start >= halftime & end <= regulation_end ~ "2nd Half",
+        start >= regulation_end ~ "Overtime",
+        TRUE ~ "Split"
+      )
+    )
+
+  scraped_stats <- bigballR::get_player_stats(play_by_play_data = game_data)
+
+  team_players <- scraped_stats %>%
+    dplyr::filter(Team == team_name) %>%
+    dplyr::mutate(clean_name = norm_name(Player)) %>%
+    dplyr::pull(clean_name) %>%
+    unique()
+
+  player_shifts_final <- player_shifts_final %>%
+    dplyr::mutate(CleanName = norm_name(player)) %>%
+    dplyr::filter(CleanName %in% team_players)
+
+  player_pm <- player_shifts_final %>%
+    dplyr::rowwise() %>%
+    dplyr::mutate(
+      team_start = game_data[[paste0(team_prefix, "_Score")]][
+        which.min(abs(game_data$Game_Seconds - start))
+      ],
+      team_end   = game_data[[paste0(team_prefix, "_Score")]][
+        which.min(abs(game_data$Game_Seconds - end))
+      ],
+      opp_start  = game_data[[paste0(opp_prefix, "_Score")]][
+        which.min(abs(game_data$Game_Seconds - start))
+      ],
+      opp_end    = game_data[[paste0(opp_prefix, "_Score")]][
+        which.min(abs(game_data$Game_Seconds - end))
+      ],
+      team_pm    = (team_end - team_start) - (opp_end - opp_start)
+    ) %>%
+    dplyr::ungroup()
+
+  player_stats <- player_stats %>%
+    dplyr::mutate(CleanName = norm_name(player_id), MIN = MINS)
+
+  box_stats <- player_stats %>%
+    dplyr::select(CleanName, MIN, PTS, ORB, DRB, AST, TOV, STL, BLK, `eFG.`, PTS_ast) %>%
+    dplyr::mutate(
+      TRB = DRB + ORB,
+      dplyr::across(
+        c(MIN, PTS, TRB, AST, TOV, STL, BLK, `eFG.`, PTS_ast),
+        ~ tidyr::replace_na(.x, 0)
+      )
+    )
+
+  game_pm <- max(game_data[[paste0(team_prefix, "_Score")]]) -
+    max(game_data[[paste0(opp_prefix, "_Score")]])
+
+  pm_on <- player_pm %>%
+    dplyr::group_by(CleanName) %>%
+    dplyr::summarise(on_pm = sum(team_pm), .groups = "drop") %>%
+    dplyr::mutate(
+      off_pm = game_pm - on_pm,
+      net    = on_pm - off_pm
+    )
+
+  pm_on_off <- pm_on %>%
+    dplyr::left_join(box_stats, by = "CleanName") %>%
+    dplyr::mutate(
+      label = glue(
+        "<b>{CleanName}<br>(On: {on_pm} · Off: {off_pm} · Net: {net})</b><br>",
+        "{PTS} pts, {TRB} reb, {AST} ast, {TOV} TO, {STL} stl, {BLK} blk<br>",
+        "{percent(`eFG.`, accuracy = 0.1)} eFG<br>{round(MIN,1)} mins"
+      )
+    )
+
+  player_pm %>%
+    dplyr::left_join(pm_on_off %>% dplyr::select(CleanName, label), by = "CleanName") %>%
+    dplyr::mutate(label = forcats::fct_reorder(label, -start))
+}
+```
+
+## Build shift data and headshots
+
+```{r shift-data}
+shift_data <- generate_shift_chart(
+  game_id   = last_game_id,
+  team_name = team_name,
+  teamids   = teamids,
+  season    = season
+)
+
+if (nrow(shift_data) == 0 || all(is.na(shift_data$label))) {
+  stop("No shift chart data available for this game.")
+}
+
+heads0 <- shift_data %>%
+    distinct(label, CleanName) %>%
+    mutate(
+        CleanName_try = recode(CleanName, !!!alias_map, .default = CleanName),
+        base_shift    = base_name(CleanName_try)
+    ) %>%
+    left_join(roster_team %>% select(CleanName_roster, headshot_url),
+              by = c("CleanName_try" = "CleanName_roster")) %>%
+    left_join(
+        roster_team %>% select(base_roster, headshot_url_base = headshot_url),
+        by = c("base_shift" = "base_roster")
+    ) %>%
+    mutate(headshot_url = coalesce(headshot_url, headshot_url_base)) %>%
+    select(-headshot_url_base)
+
+# tight fuzzy fallback within team (max edit distance 2)
+if (anyNA(heads0$headshot_url)) {
+    need <- heads0 %>% filter(is.na(headshot_url)) %>% pull(CleanName_try)
+    if (length(need)) {
+        suppressPackageStartupMessages(library(stringdist))
+        cand <- roster_team %>% mutate(CleanName_roster = norm_name(CleanName_roster))
+        fuzz <- map_dfr(need, function(nm) {
+            cand %>%
+                mutate(dist = stringdist(nm, CleanName_roster, method = "lv")) %>%
+                slice_min(dist, n = 1, with_ties = FALSE) %>%
+                mutate(CleanName_try = nm)
+        }) %>% select(CleanName_try, headshot_url_fuzzy = headshot_url, dist)
+        heads0 <- heads0 %>%
+            left_join(fuzz, by = "CleanName_try") %>%
+            mutate(headshot_url = if_else(is.na(headshot_url) & dist <= 2, headshot_url_fuzzy, headshot_url)) %>%
+            select(-headshot_url_fuzzy, -dist)
+    }
+}
+
+heads <- heads0 %>%
+    mutate(
+        headshot_url = if_else(grepl("/full/0\\.(png|jpg)$", headshot_url), NA_character_, headshot_url),
+        ok = vapply(headshot_url, url_ok, logical(1))
+    ) %>%
+    transmute(label, CleanName, headshot_url = if_else(ok, headshot_url, NA_character_),
+              .x = -160, .y = 0.5) %>%
+    filter(!is.na(headshot_url))
+```
+
+## Shift chart
+
+```{r shift-plot, fig.width=14, fig.height=10}
+halftime     <- 1200
+final_second <- max(shift_data$end, na.rm = TRUE)
+
+p_shift <- ggplot(shift_data, aes(xmin = start, xmax = end, ymin = 0, ymax = 1)) +
+    ggimage::geom_image(
+        data = heads,
+        aes(x = .x, y = .y, image = headshot_url),
+        inherit.aes = FALSE,
+        size = 1.0,
+        by = "width"
+    ) +
+    geom_rect(aes(fill = team_pm), color = "gray30") +
+    geom_text(
+        aes(x = (start + end) / 2, y = 0.5, label = team_pm),
+        color = "black",
+        size  = 3
+    ) +
+    geom_vline(xintercept = halftime, linetype = "dashed", color = "gray50") +
+    scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0) +
+    facet_grid(rows = vars(label), switch = "y") +
+    theme_minimal() +
+    labs(
+        title    = glue("{team_name} Player Shift Chart"),
+        subtitle = glue("Plus/minus per on-court shift\nFinal Score: {final_score}"),
+        fill     = "Plus/Minus"
+    ) +
+    theme(
+        plot.title.position = "plot",
+        plot.title   = element_text(hjust = 0.5),
+        plot.subtitle= element_text(hjust = 0.5),
+        strip.text.y.left = ggtext::element_markdown(angle = 0, hjust = 1, size = 10),
+        axis.title        = element_blank(),
+        axis.text.y       = element_blank(),
+        axis.ticks.y      = element_blank(),
+        panel.grid.major.y = element_line(color = "gray80"),
+        panel.spacing.y   = unit(0.6, "lines"),
+        legend.position   = "bottom",
+        plot.margin       = margin(t = 8, r = 20, b = 8, l = 30)
+    ) +
+    coord_cartesian(xlim = c(-220, final_second), ylim = c(0, 1), clip = "off") +
+    scale_x_continuous(
+        breaks = c(0, 600, 1200, 1800, 2400),
+        labels = c("0:00", "10:00", "Halftime", "30:00", "End Regulation")
+    )
+
+p_shift
+```
+
+## Save PNG with date and opponent
+
+```{r save-file, echo=TRUE}
+outfile <- glue("{today}_{last_game_opp}__shift_chart.png")
+
+ggsave(
+  filename = outfile,
+  plot     = p_shift,
+  width    = 14,
+  height   = 10,
+  dpi      = 300,
+  bg       = "white"
+)
+
+outfile
+```
