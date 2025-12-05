@@ -45,3 +45,82 @@ project/
     └── team_sched_ark_2025-26.rds      # Pre-saved team schedule (avoids scraping)
 ```
 
+
+# 3. Running the Report
+Step 1 — Open the .qmd file
+
+In RStudio:
+
+File → Open File
+
+Select shift_chart_latest_game.qmd
+
+# Step 2 — Render the report
+
+Click the Render button (top ribbon in RStudio).
+
+This will:
+
+Load required data from the /data folder
+
+Compute the shift windows
+
+Attach headshots
+
+Generate the shift chart
+
+Save a PNG in the project folder named:
+```
+YYYY.MM.DD_Opponent__shift_chart.png
+```
+# Step 3 — View the HTML output
+
+After rendering, an HTML file with the same name will open automatically:
+```
+shift_chart_latest_game.html
+```
+You can share this or the PNG with coaches/staff.
+
+# 4. Changing Teams or Seasons (Optional)
+
+At the top of the .qmd file:
+```
+params:
+  team_name: "Arkansas"
+  season: "2025-26"
+```
+Edit these values, then click Render again.
+
+Note: If using other teams/seasons, the scraping functions may require additional pre-saved RDS files just like team_sched_ark_2025-26.rds.
+
+# 5. Troubleshooting
+“subscript out of bounds” in get_team_schedule()
+
+This occurs when the source website layout changes.
+Use the included .rds schedule file instead of live scraping (already configured in this report).
+
+Missing data objects
+
+Make sure all files in the /data folder remain in place and keep the same names.
+
+Headshots not appearing
+
+Roster names rely on fuzzy matching; mismatches may require adding extra name aliases.
+
+# 6. Contact / Modifications
+
+If you need:
+
+support for additional teams
+
+redesigned visuals
+
+batch processing of multiple games
+
+integration with internal scouting workflows
+
+the script can be extended easily. Just ask Austin.
+
+
+
+
