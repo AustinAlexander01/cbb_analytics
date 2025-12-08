@@ -2,15 +2,15 @@ name: Update schedules
 
 on:
   schedule:
-    # Every day at 07:00 UTC (adjust if you want)
+    # Every day at 07:00 UTC
     - cron: '0 7 * * *'
-  workflow_dispatch: {}   # allows manual run from the Actions tab
+  workflow_dispatch: {}
 
 jobs:
   update-schedules:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed so the workflow can commit updated .rds files
+      contents: write   # allow committing updated data files
 
     steps:
       - name: Checkout repo
@@ -26,12 +26,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
 
-- name: Install R packages
-  env:
-    GITHUB_PAT: ${{ secrets.GH_PAT }}
-  run: |
-    Rscript -e 'install.packages(c("devtools","dplyr","glue"))'
-    Rscript -e 'devtools::install_github("jflancer/bigballR")'
+      - name: Install R packages
+        env:
+          GITHUB_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          Rscript -e "install.packages(c('remotes','dplyr','glue'))"
+          Rscript -e "remotes::install_github('jflancer/bigballR')"
 
       - name: Run schedule updater
         run: |
@@ -50,4 +50,5 @@ jobs:
           else
             echo "No changes to commit."
           fi
+
 
