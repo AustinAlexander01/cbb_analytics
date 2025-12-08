@@ -11,33 +11,57 @@ teams   <- c("Arkansas")
 seasons <- c("2025-26")   # add "2024-25" etc. as needed
 
 out_dir <- "data"         # keep outputs alongside mbb_rosters_25_26.rda
-
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+safe_get_team_schedule <- function(team_name, season_str) {
+  message("Updating schedule for team = ", team_name,
+          ", season = ", season_str)
+
+  # DO NOT transform "2025-26" -> "2025" here; bigballR expects "2025-26"
+  sched_raw <- tryCatch(
+    {
+      bigballR::get_team_schedule(
+        season    = season_str,   # e.g. "2025-26"
+        team.name = team_name
+      )
+    },
+    error = function(e) {
+      message("  Failed to get schedule: ", conditionMessage(e))
+      return(NULL)
+    }
+  )
+
+  if (is.null(sched_raw) || nrow(sched_raw) == 0) {
+    message("  No rows returned for this team/season; skipping.")
+    return(NULL)
+  }
+
+  sched_raw %>%
+    mutate(
+      opponent    = ifelse(Home == team_name, Away, Home),
+      location    = ifelse(Home == team_name, "vs", "at"),
+      label_game  = glue("{Date} {location} {opponent}"),
+      final_score = glue("{Home} {Home_Score} - {Away} {Away_Score}")
+    )
+}
 
 for (tm in teams) {
   for (ss in seasons) {
 
-    api_season <- if (grepl("-", ss)) sub("-.*", "", ss) else ss
+    sched <- safe_get_team_schedule(tm, ss)
 
-    message("Updating schedule for team = ", tm, ", season = ", ss,
-            " (API season = ", api_season, ")")
+    if (is.null(sched)) {
+      next
+    }
 
-    sched_raw <- bigballR::get_team_schedule(
-      season    = api_season,
-      team.name = tm
-    )
-
-    # add the helper columns your .qmd expects
-    sched <- sched_raw %>%
-      mutate(
-        opponent    = ifelse(Home == tm, Away, Home),
-        location    = ifelse(Home == tm, "vs", "at"),
-        label_game  = glue("{Date} {location} {opponent}"),
-        final_score = glue("{Home} {Home_Score} - {Away} {Away_Score}")
-      )
-
+    # you can keep this naming pattern if your .qmd expects it;
+    # if your .qmd looks for team_sched_Arkansas_2025-26.rds, change here
     outfile <- file.path(out_dir, glue("schedule_{tm}_{ss}.rds"))
+
     saveRDS(sched, outfile)
     message("  -> saved ", normalizePath(outfile, winslash = "/"))
   }
 }
+
+message("Done updating schedules.")
+
