@@ -24,19 +24,21 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libxml2-dev \
+            libglpk-dev       # needed for igraph (and thus bigballR)
 
       - name: Install R packages
         env:
           GITHUB_PAT: ${{ secrets.GH_PAT }}
         run: |
-          Rscript -e "install.packages(c(
-            'remotes',
-            'dplyr',
-            'glue',
-            'chromote'   # needed by bigballR
-          ))"
-          Rscript -e "remotes::install_github('jflancer/bigballR')"
+          Rscript -e "install.packages(
+            c('remotes','dplyr','glue','chromote','igraph'),
+            repos = 'https://cloud.r-project.org'
+          )"
+          Rscript -e "remotes::install_github('jflancer/bigballR', dependencies = TRUE)"
 
       - name: Run schedule updater
         run: |
@@ -55,7 +57,3 @@ jobs:
           else
             echo 'No changes to commit.'
           fi
-
-
-
-
