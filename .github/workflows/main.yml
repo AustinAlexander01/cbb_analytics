@@ -28,8 +28,7 @@ jobs:
 
       - name: Install R packages
         run: |
-          Rscript -e 'install.packages(c("remotes","dplyr","glue"))'
-          Rscript -e 'remotes::install_github("camlbg/bigballR")'
+          Rscript -e 'install.packages(c("remotes","dplyr","glue", "bigballR"))'
 
       - name: Run schedule updater
         run: |
