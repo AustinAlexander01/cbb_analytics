@@ -10,7 +10,7 @@ jobs:
   update-games:
     runs-on: ubuntu-latest
 
-    # Make a PAT available to remotes::install_github()
+    # Give remotes::install_github a PAT
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
 
@@ -35,14 +35,14 @@ jobs:
       - name: Install R packages
         run: |
           Rscript -e "install.packages(
-              c('remotes','dplyr','glue','purrr','progress'),
+              c('remotes','dplyr','glue','purrr','progress','chromote','igraph'),
               repos = 'https://cloud.r-project.org'
           )"
           Rscript -e "remotes::install_github('jflancer/bigballR')"
 
-      - name: Run game updater
+      - name: Run daily game updater
         run: |
-          Rscript R/update_yesterday_games.R
+          Rscript R/update_games_daily.R
 
       - name: Commit and push if there are changes
         env:
@@ -50,7 +50,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add cache/ master_schedule/
+          git add data/ cache/
           if ! git diff --cached --quiet; then
             git commit -m "Update yesterday's games [skip ci]"
             git push
