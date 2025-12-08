@@ -26,12 +26,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
 
-      - name: Install R packages
-        env:
-          GITHUB_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          Rscript -e 'install.packages(c("remotes","dplyr","glue"))'
-          Rscript -e 'remotes::install_github("camlbg/bigballR")'
+- name: Install R packages
+  env:
+    GITHUB_PAT: ${{ secrets.GH_PAT }}
+  run: |
+    Rscript -e 'install.packages(c("devtools","dplyr","glue"))'
+    Rscript -e 'devtools::install_github("jflancer/bigballR")'
 
       - name: Run schedule updater
         run: |
