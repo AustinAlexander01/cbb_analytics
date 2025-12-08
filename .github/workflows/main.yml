@@ -1,16 +1,18 @@
-name: Update games and PBP
+name: Update games (yesterday only)
 
 on:
   schedule:
-    # Every day at 07:00 UTC (change if you want)
+    # every day at 07:00 UTC
     - cron: '0 7 * * *'
   workflow_dispatch: {}
 
 jobs:
   update-games:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+
+    # Make a PAT available to remotes::install_github()
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout repo
@@ -25,16 +27,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libcurl4-openssl-dev libssl-dev libxml2-dev libglpk40
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libxml2-dev \
+            libglpk40
 
       - name: Install R packages
         run: |
-          Rscript -e "install.packages(c('remotes','dplyr','glue','purrr','progress'))"
+          Rscript -e "install.packages(
+              c('remotes','dplyr','glue','purrr','progress'),
+              repos = 'https://cloud.r-project.org'
+          )"
           Rscript -e "remotes::install_github('jflancer/bigballR')"
 
-      - name: Run daily games updater
+      - name: Run game updater
         run: |
-          Rscript R/update_games_daily.R
+          Rscript R/update_yesterday_games.R
 
       - name: Commit and push if there are changes
         env:
@@ -42,9 +50,9 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/ cache/
+          git add cache/ master_schedule/
           if ! git diff --cached --quiet; then
-            git commit -m "Update games & PBP [skip ci]"
+            git commit -m "Update yesterday's games [skip ci]"
             git push
           else
             echo "No changes to commit."
