@@ -106,7 +106,7 @@ for (tm in teams_of_interest) {
     )
 
   if (nrow(sched_new) == 0L) {
-    message("  No games for ", tm, " on ", date_str, ".")
+    message("  No games for ", tm, " on ", date_str_yesterday, ".")
   } else {
     sched <- bind_rows(sched_old, sched_new) %>%
       distinct(GameID, .keep_all = TRUE)
