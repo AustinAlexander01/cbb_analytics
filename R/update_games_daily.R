@@ -20,33 +20,50 @@ dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
 # Teams for which you want a dedicated schedule_<Team>_<Season>.rds
 teams_of_interest <- c("Arkansas")    # extend later if you like
 
-# “Prior date games” — yesterday in UTC
-target_date <- Sys.Date() - 1L
-date_str    <- format(target_date, "%m/%d/%Y")
+# Incorporate today's games as well as yesterday's
+target_date_yesterday <- Sys.Date() - 1L
+target_date_today <- Sys.Date()
 
-message("Updating games for ", date_str, " (", season_label, ")")
+date_str_yesterday <- format(target_date_yesterday, "%m/%d/%Y")
+date_str_today <- format(target_date_today, "%m/%d/%Y")
 
-## ---- STEP 1: GET GAMES FOR YESTERDAY -------------------------------------
+message("Updating games for ", date_str_yesterday, " and ", date_str_today, " (", season_label, ")")
 
-games_raw <- tryCatch(
+## ---- STEP 1: GET GAMES FOR YESTERDAY & TODAY ----
+
+games_yesterday <- tryCatch(
   {
-    bigballR::get_date_games(date = date_str)
+    bigballR::get_date_games(date = date_str_yesterday)
   },
   error = function(e) {
-    message("Failed to get games for ", date_str, ": ", conditionMessage(e))
+    message("Failed to get games for ", date_str_yesterday, ": ", conditionMessage(e))
     NULL
   }
 )
 
+games_today <- tryCatch(
+  {
+    bigballR::get_date_games(date = date_str_today)
+  },
+  error = function(e) {
+    message("Failed to get games for ", date_str_today, ": ", conditionMessage(e))
+    NULL
+  }
+)
+
+# Combine results
+games_raw <- bind_rows(games_yesterday, games_today)
+
 if (is.null(games_raw) || nrow(games_raw) == 0L) {
-  message("No games returned for ", date_str, ". Nothing to update.")
+  message("No games returned for specified dates. Nothing to update.")
   quit(save = "no")
 }
 
 games_new <- games_raw %>%
   distinct(GameID, .keep_all = TRUE)
 
-message("Games found on ", date_str, ": ", nrow(games_new))
+message("Games found: ", nrow(games_new))
+
 
 ## ---- STEP 2: UPDATE MASTER GAMES TABLE -----------------------------------
 
