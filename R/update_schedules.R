@@ -8,7 +8,8 @@ library(bigballR)
 
 dir.create("cache", showWarnings = FALSE)
 
-teamids <- readr::read_csv("teamids.csv", show_col_types = FALSE)
+load("teamids.rda")   # or "data/teamids.rda"
+# now 'teamids' is available in your script
 
 make_schedule_cache_for_team <- function(team_id,
                                          teamids,
