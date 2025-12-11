@@ -1,18 +1,18 @@
-name: Update schedules cache
+name: Update CBB schedule cache
 
 on:
   schedule:
-    # Every day at 06:00 UTC (adjust as you like)
-    - cron: '0 6 * * *'
-  # Allow manual runs too
-  workflow_dispatch:
-
-permissions:
-  contents: write   # needed to push changes
+    - cron: '0 8 * * *'   # runs every day at 08:00 UTC
+  workflow_dispatch:       # allow manual runs
 
 jobs:
-  update-schedules:
+  build-cache:
     runs-on: ubuntu-latest
+
+    env:
+      R_LIBS_USER: /home/runner/work/_temp/Library
+      TZ: UTC
+      NOT_CRAN: true
 
     steps:
       - name: Checkout repo
@@ -20,19 +20,18 @@ jobs:
 
       - name: Set up R
         uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: '4.4.0'
 
       - name: Install R packages
         run: |
-          Rscript -e 'install.packages(c("remotes"), repos = "https://cloud.r-project.org")'
-          Rscript -e 'pkgs <- c("dplyr","readr","glue","purrr","bigballR"); \
-                      inst <- rownames(installed.packages()); \
-                      install.packages(setdiff(pkgs, inst), repos = "https://cloud.r-project.org")'
+          Rscript -e "install.packages(
+              c('remotes','dplyr','readr','glue','purrr'),
+              repos = 'https://cloud.r-project.org'
+          )"
+          Rscript -e "remotes::install_github('jflancer/bigballR')"
 
-      - name: Run schedule cache script
+      - name: Update schedules cache
         run: |
-          Rscript scripts/update_schedules.R
+          Rscript R/update_schedules.R
 
       - name: Commit and push changes (if any)
         env:
