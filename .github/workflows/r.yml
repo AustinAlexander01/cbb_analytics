@@ -1,39 +1,60 @@
-name: Update CBB schedule cache
+name: Update schedules
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # runs every day at 08:00 UTC
-  workflow_dispatch:       # allow manual runs
+    - cron: "0 6 * * *"   # every day 06:00 UTC; adjust as needed
+  workflow_dispatch:      # allow manual run
 
 jobs:
-  build-cache:
+  update-schedules:
     runs-on: ubuntu-latest
 
     env:
       R_LIBS_USER: /home/runner/work/_temp/Library
       TZ: UTC
       NOT_CRAN: true
+      _R_CHECK_SYSTEM_CLOCK_: FALSE
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up R
-        uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3.2'   # or whatever you like ≥ 4.1
 
+      # 1) System libraries needed for curl, systemfonts, etc.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libfribidi-dev \
+            libpng-dev \
+            libtiff5-dev \
+            libjpeg-dev
+
+      # 2) R packages + bigballR
       - name: Install R packages
-        env:
-          GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}   # <- key line
         run: |
           Rscript -e "install.packages(
-              c('remotes','dplyr','readr','glue','purrr'),
+              c('remotes','dplyr','readr','glue','purrr','progress'),
               repos = 'https://cloud.r-project.org'
+          )"
+          Rscript -e "install.packages(
+              c('curl','systemfonts','httr','ggforce','rvest','ggraph'),
+              repos = 'https://cloud.r-project.org',
+              dependencies = TRUE
           )"
           Rscript -e "remotes::install_github('jflancer/bigballR')"
 
-      - name: Update schedules cache
-        run: |
-          Rscript R/update_schedules.R
+      # 3) Run your schedule updater
+      - name: Update schedules
+        run: Rscript R/update_schedules.R
+
 
       - name: Commit and push changes (if any)
         env:
