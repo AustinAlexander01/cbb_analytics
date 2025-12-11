@@ -1,0 +1,50 @@
+name: Update schedules cache
+
+on:
+  schedule:
+    # Every day at 06:00 UTC (adjust as you like)
+    - cron: '0 6 * * *'
+  # Allow manual runs too
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to push changes
+
+jobs:
+  update-schedules:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.4.0'
+
+      - name: Install R packages
+        run: |
+          Rscript -e 'install.packages(c("remotes"), repos = "https://cloud.r-project.org")'
+          Rscript -e 'pkgs <- c("dplyr","readr","glue","purrr","bigballR"); \
+                      inst <- rownames(installed.packages()); \
+                      install.packages(setdiff(pkgs, inst), repos = "https://cloud.r-project.org")'
+
+      - name: Run schedule cache script
+        run: |
+          Rscript scripts/update_schedules.R
+
+      - name: Commit and push changes (if any)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add cache/
+            git commit -m "Auto-update schedules cache"
+            git push
+          else
+            echo "No changes to commit."
+          fi
+
