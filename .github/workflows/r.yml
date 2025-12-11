@@ -22,6 +22,8 @@ jobs:
         uses: r-lib/actions/setup-r@v2
 
       - name: Install R packages
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}   # <- key line
         run: |
           Rscript -e "install.packages(
               c('remotes','dplyr','readr','glue','purrr'),
